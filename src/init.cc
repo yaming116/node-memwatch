@@ -17,7 +17,7 @@ extern "C" {
         Nan::SetMethod(target, "upon_gc", memwatch::upon_gc);
         Nan::SetMethod(target, "gc", memwatch::trigger_gc);
 
-        v8::V8::AddGCEpilogueCallback(memwatch::after_gc);
+        Nan::AddGCEpilogueCallback(memwatch::after_gc);
     }
 
     NODE_MODULE(memwatch, init);

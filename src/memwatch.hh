@@ -12,7 +12,7 @@ namespace memwatch
 {
     NAN_METHOD(upon_gc);
     NAN_METHOD(trigger_gc);
-    void after_gc(v8::GCType type, v8::GCCallbackFlags flags);
+    NAN_GC_CALLBACK(after_gc);
 };
 
 #endif

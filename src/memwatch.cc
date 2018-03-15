@@ -21,7 +21,27 @@ using namespace v8;
 using namespace node;
 
 Handle<Object> g_context;
-Nan::Callback *g_cb;
+
+class UponGCCallback : public Nan::AsyncResource {
+    public:
+    UponGCCallback(v8::Local<v8::Function> callback_) : Nan::AsyncResource("memwatch:upon_gc") {
+        callback.Reset(callback_);
+    }
+    ~UponGCCallback() {
+        callback.Reset();
+    }
+
+    void Call(int argc, Local<v8::Value> argv[]) {
+        v8::Isolate *isolate = v8::Isolate::GetCurrent();
+        runInAsyncScope(isolate->GetCurrentContext()->Global(), Nan::New(callback), argc, argv);
+    }
+
+    private:
+    Nan::Persistent<v8::Function> callback;
+};
+
+UponGCCallback *uponGCCallback = NULL;
+
 
 struct Baton {
     uv_work_t req;
@@ -125,7 +145,9 @@ static void AsyncMemwatchAfter(uv_work_t* request) {
                 // the type of event to emit
                 argv[1] = Nan::New("leak").ToLocalChecked();
                 argv[2] = getLeakReport(b->heapUsage);
-                g_cb->Call(3, argv);
+                if (uponGCCallback) {
+                    uponGCCallback->Call(3, argv);
+                }
             }
         } else {
             s_stats.consecutive_growth = 0;
@@ -171,14 +193,8 @@ static void AsyncMemwatchAfter(uv_work_t* request) {
         }
 
         // if there are any listeners, it's time to emit!
-        if (!g_cb->IsEmpty()) {
+        if (uponGCCallback) {
             Local<Value> argv[3];
-            // magic argument to indicate to the callback all we want to know is whether there are
-            // listeners (here we don't)
-            argv[0] = Nan::New<v8::Boolean>(true);
-
-            //Handle<Value> haveListeners = g_cb->call(1, argv);
-
 
             double ut= 0.0;
             if (s_stats.base_ancient) {
@@ -200,7 +216,7 @@ static void AsyncMemwatchAfter(uv_work_t* request) {
             // the type of event to emit
             argv[1] = Nan::New("stats").ToLocalChecked();
             argv[2] = stats;
-            g_cb->Call(3, argv);
+            uponGCCallback->Call(3, argv);
         }
     }
 
@@ -209,8 +225,7 @@ static void AsyncMemwatchAfter(uv_work_t* request) {
 
 static void noop_work_func(uv_work_t *) { }
 
-void memwatch::after_gc(GCType type, GCCallbackFlags flags)
-{
+NAN_GC_CALLBACK(memwatch::after_gc) {
     if (heapdiff::HeapDiff::InProgress()) return;
 
     Nan::HandleScope scope;
@@ -237,7 +252,7 @@ void memwatch::after_gc(GCType type, GCCallbackFlags flags)
 NAN_METHOD(memwatch::upon_gc) {
     Nan::HandleScope scope;
     if (info.Length() >= 1 && info[0]->IsFunction()) {
-        g_cb = new Nan::Callback(info[0].As<v8::Function>());
+        uponGCCallback = new UponGCCallback(info[0].As<v8::Function>());
     }
     info.GetReturnValue().Set(Nan::Undefined());
 }
