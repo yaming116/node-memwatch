@@ -42,185 +42,92 @@ class UponGCCallback : public Nan::AsyncResource {
 
 UponGCCallback *uponGCCallback = NULL;
 
-
 struct Baton {
     uv_work_t req;
-    size_t heapUsage;
+    size_t total_heap_size;
+    size_t total_heap_size_executable;
+    size_t total_physical_size;
+    size_t total_available_size;
+    size_t used_heap_size;
+    size_t heap_size_limit;
+    size_t malloced_memory;
+    size_t peak_malloced_memory;
+
+    uint64_t gc_time;
+
     GCType type;
     GCCallbackFlags flags;
 };
 
-static const unsigned int RECENT_PERIOD = 10;
-static const unsigned int ANCIENT_PERIOD = 120;
-
+static uint64_t currentGCStartTime = 0;
 static struct
 {
     // counts of different types of gc events
-    unsigned int gc_full;
-    unsigned int gc_inc;
-    unsigned int gc_compact;
+    size_t gcScavengeCount;
+    uint64_t gcScavengeTime;
 
-    // last base heap size as measured *right* after GC
-    unsigned int last_base;
+    size_t gcMarkSweepCompactCount;
+    uint64_t gcMarkSweepCompactTime;
 
-    // the estimated "base memory" usage of the javascript heap
-    // over the RECENT_PERIOD number of GC runs
-    unsigned int base_recent;
+    size_t gcIncrementalMarkingCount;
+    uint64_t gcIncrementalMarkingTime;
 
-    // the estimated "base memory" usage of the javascript heap
-    // over the ANCIENT_PERIOD number of GC runs
-    unsigned int base_ancient;
-
-    // the most extreme values we've seen for base heap size
-    unsigned int base_max;
-    unsigned int base_min;
-
-    // leak detection!
-
-    // the period from which this leak analysis starts
-    time_t leak_time_start;
-    // the base memory for the detection period
-    time_t leak_base_start;
-    // the number of consecutive compactions for which we've grown
-    unsigned int consecutive_growth;
+    size_t gcProcessWeakCallbacksCount;
+    uint64_t gcProcessWeakCallbacksTime;
 } s_stats;
 
-static Local<Value> getLeakReport(size_t heapUsage)
-{
-    Nan::EscapableHandleScope scope;
+static v8::Local<v8::Number> javascriptNumber(uint64_t n) {
+    if (n < pow(2, 32)) {
+        return Nan::New(static_cast<uint32_t>(n));
+    } else {
+        return Nan::New(static_cast<double>(n));
+    }
+}
 
-    size_t growth = heapUsage - s_stats.leak_base_start;
-    int now = time(NULL);
-    int delta = now - s_stats.leak_time_start;
-
-    Local<Object> leakReport = Nan::New<v8::Object>();
-    //leakReport->Set(Nan::New("start").ToLocalChecked(), NODE_UNIXTIME_V8(s_stats.leak_time_start));
-    //leakReport->Set(Nan::New("end").ToLocalChecked(), NODE_UNIXTIME_V8(now));
-    leakReport->Set(Nan::New("growth").ToLocalChecked(), Nan::New<v8::Number>(growth));
-
-    std::stringstream ss;
-    ss << "heap growth over 5 consecutive GCs ("
-       << mw_util::niceDelta(delta) << ") - "
-       << mw_util::niceSize(growth / ((double) delta / (60.0 * 60.0))) << "/hr";
-
-    leakReport->Set(Nan::New("reason").ToLocalChecked(), Nan::New(ss.str().c_str()).ToLocalChecked());
-
-    return scope.Escape(leakReport);
+static v8::Local<v8::Number> javascriptNumber(size_t n) {
+    return javascriptNumber(static_cast<uint64_t>(n));
 }
 
 static void AsyncMemwatchAfter(uv_work_t* request) {
     Nan::HandleScope scope;
 
     Baton * b = (Baton *) request->data;
+    // if there are any listeners, it's time to emit!
+    if (uponGCCallback) {
+        Local<Value> argv[2];
 
-    // do the math in C++, permanent
-    // record the type of GC event that occured
-    if (b->type == kGCTypeMarkSweepCompact) s_stats.gc_full++;
-    else s_stats.gc_inc++;
+        Local<Object> stats = Nan::New<v8::Object>();
 
-    if (
-#if NODE_VERSION_AT_LEAST(0,8,0)
-        b->type == kGCTypeMarkSweepCompact
-#else
-        b->flags == kGCCallbackFlagCompacted
-#endif
-        ) {
-        // leak detection code.  has the heap usage grown?
-        if (s_stats.last_base < b->heapUsage) {
-            if (s_stats.consecutive_growth == 0) {
-                s_stats.leak_time_start = time(NULL);
-                s_stats.leak_base_start = b->heapUsage;
-            }
+        stats->Set(Nan::New("gcScavengeCount").ToLocalChecked(), javascriptNumber(s_stats.gcScavengeCount));
+        stats->Set(Nan::New("gcScavengeTime").ToLocalChecked(), javascriptNumber(s_stats.gcScavengeTime));
+        stats->Set(Nan::New("gcMarkSweepCompactCount").ToLocalChecked(), javascriptNumber(s_stats.gcMarkSweepCompactCount));
+        stats->Set(Nan::New("gcMarkSweepCompactTime").ToLocalChecked(), javascriptNumber(s_stats.gcMarkSweepCompactTime));
+        stats->Set(Nan::New("gcIncrementalMarkingCount").ToLocalChecked(), javascriptNumber(s_stats.gcIncrementalMarkingCount));
+        stats->Set(Nan::New("gcIncrementalMarkingTime").ToLocalChecked(), javascriptNumber(s_stats.gcIncrementalMarkingTime));
+        stats->Set(Nan::New("gcProcessWeakCallbacksCount").ToLocalChecked(), javascriptNumber(s_stats.gcProcessWeakCallbacksCount));
+        stats->Set(Nan::New("gcProcessWeakCallbacksTime").ToLocalChecked(), javascriptNumber(s_stats.gcProcessWeakCallbacksTime));
 
-            s_stats.consecutive_growth++;
+        stats->Set(Nan::New("total_heap_size").ToLocalChecked(), javascriptNumber(b->total_heap_size));
+        stats->Set(Nan::New("total_heap_size_executable").ToLocalChecked(), javascriptNumber(b->total_heap_size_executable));
+        stats->Set(Nan::New("total_physical_size").ToLocalChecked(), javascriptNumber(b->total_physical_size));
+        stats->Set(Nan::New("total_available_size").ToLocalChecked(), javascriptNumber(b->total_available_size));
+        stats->Set(Nan::New("used_heap_size").ToLocalChecked(), javascriptNumber(b->used_heap_size));
+        stats->Set(Nan::New("heap_size_limit").ToLocalChecked(), javascriptNumber(b->heap_size_limit));
+        stats->Set(Nan::New("malloced_memory").ToLocalChecked(), javascriptNumber(b->malloced_memory));
+        stats->Set(Nan::New("peak_malloced_memory").ToLocalChecked(), javascriptNumber(b->peak_malloced_memory));
+        stats->Set(Nan::New("gc_time").ToLocalChecked(), javascriptNumber(b->gc_time));
 
-            // consecutive growth over 5 GCs suggests a leak
-            if (s_stats.consecutive_growth >= 5) {
-                // reset to zero
-                s_stats.consecutive_growth = 0;
-
-                // emit a leak report!
-                Local<Value> argv[3];
-                argv[0] = Nan::New<v8::Boolean>(false);
-                // the type of event to emit
-                argv[1] = Nan::New("leak").ToLocalChecked();
-                argv[2] = getLeakReport(b->heapUsage);
-                if (uponGCCallback) {
-                    uponGCCallback->Call(3, argv);
-                }
-            }
-        } else {
-            s_stats.consecutive_growth = 0;
-        }
-
-        // update last_base
-        s_stats.last_base = b->heapUsage;
-
-        // update compaction count
-        s_stats.gc_compact++;
-
-        // the first ten compactions we'll use a different algorithm to
-        // dampen out wider memory fluctuation at startup
-        if (s_stats.gc_compact < RECENT_PERIOD) {
-            double decay = pow(s_stats.gc_compact / RECENT_PERIOD, 2.5);
-            decay *= s_stats.gc_compact;
-            if (ISINF(decay) || ISNAN(decay)) decay = 0;
-            s_stats.base_recent = ((s_stats.base_recent * decay) +
-                                   s_stats.last_base) / (decay + 1);
-
-            decay = pow(s_stats.gc_compact / RECENT_PERIOD, 2.4);
-            decay *= s_stats.gc_compact;
-            s_stats.base_ancient = ((s_stats.base_ancient * decay) +
-                                    s_stats.last_base) /  (1 + decay);
-
-        } else {
-            s_stats.base_recent = ((s_stats.base_recent * (RECENT_PERIOD - 1)) +
-                                   s_stats.last_base) / RECENT_PERIOD;
-            double decay = FMIN(ANCIENT_PERIOD, s_stats.gc_compact);
-            s_stats.base_ancient = ((s_stats.base_ancient * (decay - 1)) +
-                                    s_stats.last_base) / decay;
-        }
-
-        // only record min/max after 3 gcs to let initial instability settle
-        if (s_stats.gc_compact >= 3) {
-            if (!s_stats.base_min || s_stats.base_min > s_stats.last_base) {
-                s_stats.base_min = s_stats.last_base;
-            }
-
-            if (!s_stats.base_max || s_stats.base_max < s_stats.last_base) {
-                s_stats.base_max = s_stats.last_base;
-            }
-        }
-
-        // if there are any listeners, it's time to emit!
-        if (uponGCCallback) {
-            Local<Value> argv[3];
-
-            double ut= 0.0;
-            if (s_stats.base_ancient) {
-                ut = (double) ROUND(((double) (s_stats.base_recent - s_stats.base_ancient) /
-                                      (double) s_stats.base_ancient) * 1000.0) / 10.0;
-            }
-
-            // ok, there are listeners, we actually must serialize and emit this stats event
-            Local<Object> stats = Nan::New<v8::Object>();
-            stats->Set(Nan::New("num_full_gc").ToLocalChecked(), Nan::New(s_stats.gc_full));
-            stats->Set(Nan::New("num_inc_gc").ToLocalChecked(), Nan::New(s_stats.gc_inc));
-            stats->Set(Nan::New("heap_compactions").ToLocalChecked(), Nan::New(s_stats.gc_compact));
-            stats->Set(Nan::New("usage_trend").ToLocalChecked(), Nan::New(ut));
-            stats->Set(Nan::New("estimated_base").ToLocalChecked(), Nan::New(s_stats.base_recent));
-            stats->Set(Nan::New("current_base").ToLocalChecked(), Nan::New(s_stats.last_base));
-            stats->Set(Nan::New("min").ToLocalChecked(), Nan::New(s_stats.base_min));
-            stats->Set(Nan::New("max").ToLocalChecked(), Nan::New(s_stats.base_max));
-            argv[0] = Nan::New<v8::Boolean>(false);
-            // the type of event to emit
-            argv[1] = Nan::New("stats").ToLocalChecked();
-            argv[2] = stats;
-            uponGCCallback->Call(3, argv);
-        }
+        // the type of event to emit
+        argv[0] = Nan::New("stats").ToLocalChecked();
+        argv[1] = stats;
+        uponGCCallback->Call(2, argv);
     }
 
     delete b;
+}
+
+NAN_GC_CALLBACK(memwatch::before_gc) {
+    currentGCStartTime = uv_hrtime();
 }
 
 static void noop_work_func(uv_work_t *) { }
@@ -228,25 +135,60 @@ static void noop_work_func(uv_work_t *) { }
 NAN_GC_CALLBACK(memwatch::after_gc) {
     if (heapdiff::HeapDiff::InProgress()) return;
 
-    Nan::HandleScope scope;
+    uint64_t gcEnd = uv_hrtime();
+    uint64_t gcTime = gcEnd - currentGCStartTime;
 
-    Baton * baton = new Baton;
-    v8::HeapStatistics hs;
+    switch(type) {
+        case kGCTypeScavenge:
+            s_stats.gcScavengeCount++;
+            s_stats.gcScavengeTime += gcTime;
+            return;
+        case kGCTypeIncrementalMarking:
+            s_stats.gcIncrementalMarkingCount++;
+            s_stats.gcIncrementalMarkingTime += gcTime;
+            return;
+        case kGCTypeProcessWeakCallbacks:
+            s_stats.gcProcessWeakCallbacksCount++;
+            s_stats.gcProcessWeakCallbacksTime += gcTime;
+            return;
 
-    Nan::GetHeapStatistics(&hs);
+        case kGCTypeMarkSweepCompact:
+        case kGCTypeAll:
+            break;
+    }
 
-    baton->heapUsage = hs.used_heap_size();
-    baton->type = type;
-    baton->flags = flags;
-    baton->req.data = (void *) baton;
+    if (type == kGCTypeMarkSweepCompact) {
+        s_stats.gcMarkSweepCompactCount++;
+        s_stats.gcMarkSweepCompactTime += gcTime;
 
-    // schedule our work to run in a moment, once gc has fully completed.
-    //
-    // here we pass a noop work function to work around a flaw in libuv,
-    // uv_queue_work on unix works fine, but will will crash on
-    // windows.  see: https://github.com/joyent/libuv/pull/629
-    uv_queue_work(uv_default_loop(), &(baton->req),
-		  noop_work_func, (uv_after_work_cb)AsyncMemwatchAfter);
+        Nan::HandleScope scope;
+
+        Baton * baton = new Baton;
+        v8::HeapStatistics hs;
+
+        Nan::GetHeapStatistics(&hs);
+
+        baton->total_heap_size = hs.total_heap_size();
+        baton->total_heap_size_executable = hs.total_heap_size_executable();
+        baton->total_physical_size = hs.total_physical_size();
+        baton->total_available_size = hs.total_available_size();
+        baton->used_heap_size = hs.used_heap_size();
+        baton->heap_size_limit = hs.heap_size_limit();
+        baton->malloced_memory = hs.malloced_memory();
+        baton->peak_malloced_memory = hs.peak_malloced_memory();
+        baton->gc_time = gcTime;
+        baton->type = type;
+        baton->flags = flags;
+        baton->req.data = (void *) baton;
+
+        // schedule our work to run in a moment, once gc has fully completed.
+        //
+        // here we pass a noop work function to work around a flaw in libuv,
+        // uv_queue_work on unix works fine, but will will crash on
+        // windows.  see: https://github.com/joyent/libuv/pull/629
+        uv_queue_work(uv_default_loop(), &(baton->req),
+            noop_work_func, (uv_after_work_cb)AsyncMemwatchAfter);
+    }
 }
 
 NAN_METHOD(memwatch::upon_gc) {

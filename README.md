@@ -1,14 +1,10 @@
 `node-memwatch`: Leak Detection and Heap Diffing for Node.JS
 ============================================================
 
-[![Build Status](https://travis-ci.org/deepak1556/node-memwatch.svg?branch=master)](https://travis-ci.org/deepak1556/node-memwatch)
-
 `node-memwatch` is here to help you detect and find memory leaks in
 Node.JS code.  It provides:
 
-- A `leak` event, emitted when it appears your code is leaking memory.
-
-- A `stats` event, emitted occasionally, giving you
+- A `stats` event, emitted on full MarkSweepCompact GCs giving you
   data describing your heap usage and trends over time.
 
 - A `HeapDiff` class that lets you compare the state of your heap between
@@ -37,28 +33,12 @@ instrumentation.  This module attempts to satisfy that need.
 To get started, import `node-memwatch` like so:
 
 ```javascript
-var memwatch = require('memwatch-next');
+var memwatch = require('airbnb-memwatch');
 ```
 
 ### Leak Detection
 
-You can then subscribe to `leak` events.  A `leak` event will be
-emitted when your heap usage has increased for five consecutive
-garbage collections:
-
-```javascript
-memwatch.on('leak', function(info) { ... });
-```
-
-The `info` object will look something like:
-
-```javascript
-{ start: Fri, 29 Jun 2012 14:12:13 GMT,
-  end: Fri, 29 Jun 2012 14:12:33 GMT,
-  growth: 67984,
-  reason: 'heap growth over 5 consecutive GCs (20s) - 11.67 mb/hr' }
-```
-
+Currently unsupported while we explore heuristics
 
 ### Heap Usage
 
@@ -79,20 +59,25 @@ The `stats` data will look something like this:
 
 ```javascript
 {
-  "num_full_gc": 17,
-  "num_inc_gc": 8,
-  "heap_compactions": 8,
-  "estimated_base": 2592568,
-  "current_base": 2592568,
-  "min": 2499912,
-  "max": 2592568,
-  "usage_trend": 0
+  gcScavengeCount: 1,
+  gcScavengeTime: 1100880, // ns
+  gcMarkSweepCompactCount: 2,
+  gcMarkSweepCompactTime: 21157231, // ns
+  gcIncrementalMarkingCount: 0,
+  gcIncrementalMarkingTime: 0, //ns
+  gcProcessWeakCallbacksCount: 0,
+  gcProcessWeakCallbacksTime: 0, // ns
+  total_heap_size: 16097280, // bytes
+  total_heap_size_executable: 3670016, // bytes
+  total_physical_size: 10741880, // bytes
+  total_available_size: 1487689928, // bytes
+  used_heap_size: 5691584, // bytes
+  heap_size_limit: 1501560832, // bytes
+  malloced_memory: 8192,
+  peak_malloced_memory: 1185464,
+  gc_time: 4587251 // ns
 }
 ```
-
-`estimated_base` and `usage_trend` are tracked over time.  If usage
-trend is consistently positive, it indicates that your base heap size
-is continuously growing and you might have a leak.
 
 V8 has its own idea of when it's best to perform a GC, and under a
 heavy load, it may defer this action for some time.  To aid in
@@ -102,9 +87,8 @@ do a full GC and heap compaction.
 
 ### Heap Diffing
 
-So far we have seen how `memwatch` can aid in leak detection.  For
-leak isolation, it provides a `HeapDiff` class that takes two snapshots
-and computes a diff between them.  For example:
+For leak isolation, it provides a `HeapDiff` class that takes two snapshots and
+computes a diff between them.  For example:
 
 ```javascript
 // Take first snapshot
