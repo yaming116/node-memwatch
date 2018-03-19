@@ -15,11 +15,7 @@ Node.JS code.  It provides:
 Installation
 ------------
 
-- `npm install memwatch-next`
-
-or
-
-- `git clone git://github.com/marcominetti/node-memwatch.git`
+- `npm install @airbnb/node-memwatch`
 
 
 Description
@@ -33,7 +29,7 @@ instrumentation.  This module attempts to satisfy that need.
 To get started, import `node-memwatch` like so:
 
 ```javascript
-var memwatch = require('airbnb-memwatch');
+var memwatch = require('@airbnb/node-memwatch');
 ```
 
 ### Leak Detection
