@@ -1,3 +1,9 @@
+v1.0.0 -
+	* Emit all HeapStatistics
+	* Add GC Timers
+	* Correctly count GC types
+	* BREAKING: Completely change stats event type
+	* BREAKING: Remove leak detection
 v0.2.2 -
 	* don't crash when a user accidentally allocates a HeapDiff without new (ala new require('memwatch').HeapDiff()) #30
 
