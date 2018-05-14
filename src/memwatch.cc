@@ -84,7 +84,7 @@ static v8::Local<v8::Number> javascriptNumber(uint64_t n) {
     }
 }
 
-static v8::Local<v8::Number> javascriptNumber(size_t n) {
+static v8::Local<v8::Number> javascriptNumberSize(size_t n) {
     return javascriptNumber(static_cast<uint64_t>(n));
 }
 
@@ -98,23 +98,23 @@ static void AsyncMemwatchAfter(uv_work_t* request) {
 
         Local<Object> stats = Nan::New<v8::Object>();
 
-        stats->Set(Nan::New("gcScavengeCount").ToLocalChecked(), javascriptNumber(s_stats.gcScavengeCount));
+        stats->Set(Nan::New("gcScavengeCount").ToLocalChecked(), javascriptNumberSize(s_stats.gcScavengeCount));
         stats->Set(Nan::New("gcScavengeTime").ToLocalChecked(), javascriptNumber(s_stats.gcScavengeTime));
-        stats->Set(Nan::New("gcMarkSweepCompactCount").ToLocalChecked(), javascriptNumber(s_stats.gcMarkSweepCompactCount));
+        stats->Set(Nan::New("gcMarkSweepCompactCount").ToLocalChecked(), javascriptNumberSize(s_stats.gcMarkSweepCompactCount));
         stats->Set(Nan::New("gcMarkSweepCompactTime").ToLocalChecked(), javascriptNumber(s_stats.gcMarkSweepCompactTime));
-        stats->Set(Nan::New("gcIncrementalMarkingCount").ToLocalChecked(), javascriptNumber(s_stats.gcIncrementalMarkingCount));
+        stats->Set(Nan::New("gcIncrementalMarkingCount").ToLocalChecked(), javascriptNumberSize(s_stats.gcIncrementalMarkingCount));
         stats->Set(Nan::New("gcIncrementalMarkingTime").ToLocalChecked(), javascriptNumber(s_stats.gcIncrementalMarkingTime));
-        stats->Set(Nan::New("gcProcessWeakCallbacksCount").ToLocalChecked(), javascriptNumber(s_stats.gcProcessWeakCallbacksCount));
+        stats->Set(Nan::New("gcProcessWeakCallbacksCount").ToLocalChecked(), javascriptNumberSize(s_stats.gcProcessWeakCallbacksCount));
         stats->Set(Nan::New("gcProcessWeakCallbacksTime").ToLocalChecked(), javascriptNumber(s_stats.gcProcessWeakCallbacksTime));
 
-        stats->Set(Nan::New("total_heap_size").ToLocalChecked(), javascriptNumber(b->total_heap_size));
-        stats->Set(Nan::New("total_heap_size_executable").ToLocalChecked(), javascriptNumber(b->total_heap_size_executable));
-        stats->Set(Nan::New("total_physical_size").ToLocalChecked(), javascriptNumber(b->total_physical_size));
-        stats->Set(Nan::New("total_available_size").ToLocalChecked(), javascriptNumber(b->total_available_size));
-        stats->Set(Nan::New("used_heap_size").ToLocalChecked(), javascriptNumber(b->used_heap_size));
-        stats->Set(Nan::New("heap_size_limit").ToLocalChecked(), javascriptNumber(b->heap_size_limit));
-        stats->Set(Nan::New("malloced_memory").ToLocalChecked(), javascriptNumber(b->malloced_memory));
-        stats->Set(Nan::New("peak_malloced_memory").ToLocalChecked(), javascriptNumber(b->peak_malloced_memory));
+        stats->Set(Nan::New("total_heap_size").ToLocalChecked(), javascriptNumberSize(b->total_heap_size));
+        stats->Set(Nan::New("total_heap_size_executable").ToLocalChecked(), javascriptNumberSize(b->total_heap_size_executable));
+        stats->Set(Nan::New("total_physical_size").ToLocalChecked(), javascriptNumberSize(b->total_physical_size));
+        stats->Set(Nan::New("total_available_size").ToLocalChecked(), javascriptNumberSize(b->total_available_size));
+        stats->Set(Nan::New("used_heap_size").ToLocalChecked(), javascriptNumberSize(b->used_heap_size));
+        stats->Set(Nan::New("heap_size_limit").ToLocalChecked(), javascriptNumberSize(b->heap_size_limit));
+        stats->Set(Nan::New("malloced_memory").ToLocalChecked(), javascriptNumberSize(b->malloced_memory));
+        stats->Set(Nan::New("peak_malloced_memory").ToLocalChecked(), javascriptNumberSize(b->peak_malloced_memory));
         stats->Set(Nan::New("gc_time").ToLocalChecked(), javascriptNumber(b->gc_time));
 
         // the type of event to emit
