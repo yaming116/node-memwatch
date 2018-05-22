@@ -16,6 +16,7 @@
 
 #include <math.h> // for pow
 #include <time.h> // for time
+#include <sys/time.h>
 
 using namespace v8;
 using namespace node;
@@ -42,26 +43,7 @@ class UponGCCallback : public Nan::AsyncResource {
 
 UponGCCallback *uponGCCallback = NULL;
 
-struct Baton {
-    uv_work_t req;
-    size_t total_heap_size;
-    size_t total_heap_size_executable;
-    size_t total_physical_size;
-    size_t total_available_size;
-    size_t used_heap_size;
-    size_t heap_size_limit;
-    size_t malloced_memory;
-    size_t peak_malloced_memory;
-
-    uint64_t gc_time;
-
-    GCType type;
-    GCCallbackFlags flags;
-};
-
-static uint64_t currentGCStartTime = 0;
-static struct
-{
+struct GCStats {
     // counts of different types of gc events
     size_t gcScavengeCount;
     uint64_t gcScavengeTime;
@@ -74,7 +56,31 @@ static struct
 
     size_t gcProcessWeakCallbacksCount;
     uint64_t gcProcessWeakCallbacksTime;
-} s_stats;
+};
+
+struct Baton {
+    uv_work_t req;
+    size_t total_heap_size;
+    size_t total_heap_size_executable;
+    size_t total_physical_size;
+    size_t total_available_size;
+    size_t used_heap_size;
+    size_t heap_size_limit;
+    size_t malloced_memory;
+    size_t peak_malloced_memory;
+
+    GCStats stats;
+
+    uint64_t gc_time;
+
+    uint64_t gc_ts;
+
+    GCType type;
+    GCCallbackFlags flags;
+};
+
+static uint64_t currentGCStartTime = 0;
+static GCStats s_stats = {0, 0, 0, 0, 0, 0, 0, 0};
 
 static v8::Local<v8::Number> javascriptNumber(uint64_t n) {
     if (n < pow(2, 32)) {
@@ -98,14 +104,16 @@ static void AsyncMemwatchAfter(uv_work_t* request) {
 
         Local<Object> stats = Nan::New<v8::Object>();
 
-        stats->Set(Nan::New("gcScavengeCount").ToLocalChecked(), javascriptNumberSize(s_stats.gcScavengeCount));
-        stats->Set(Nan::New("gcScavengeTime").ToLocalChecked(), javascriptNumber(s_stats.gcScavengeTime));
-        stats->Set(Nan::New("gcMarkSweepCompactCount").ToLocalChecked(), javascriptNumberSize(s_stats.gcMarkSweepCompactCount));
-        stats->Set(Nan::New("gcMarkSweepCompactTime").ToLocalChecked(), javascriptNumber(s_stats.gcMarkSweepCompactTime));
-        stats->Set(Nan::New("gcIncrementalMarkingCount").ToLocalChecked(), javascriptNumberSize(s_stats.gcIncrementalMarkingCount));
-        stats->Set(Nan::New("gcIncrementalMarkingTime").ToLocalChecked(), javascriptNumber(s_stats.gcIncrementalMarkingTime));
-        stats->Set(Nan::New("gcProcessWeakCallbacksCount").ToLocalChecked(), javascriptNumberSize(s_stats.gcProcessWeakCallbacksCount));
-        stats->Set(Nan::New("gcProcessWeakCallbacksTime").ToLocalChecked(), javascriptNumber(s_stats.gcProcessWeakCallbacksTime));
+        stats->Set(Nan::New("gc_ts").ToLocalChecked(), javascriptNumber(b->gc_ts));
+
+        stats->Set(Nan::New("gcScavengeCount").ToLocalChecked(), javascriptNumberSize(b->stats.gcScavengeCount));
+        stats->Set(Nan::New("gcScavengeTime").ToLocalChecked(), javascriptNumber(b->stats.gcScavengeTime));
+        stats->Set(Nan::New("gcMarkSweepCompactCount").ToLocalChecked(), javascriptNumberSize(b->stats.gcMarkSweepCompactCount));
+        stats->Set(Nan::New("gcMarkSweepCompactTime").ToLocalChecked(), javascriptNumber(b->stats.gcMarkSweepCompactTime));
+        stats->Set(Nan::New("gcIncrementalMarkingCount").ToLocalChecked(), javascriptNumberSize(b->stats.gcIncrementalMarkingCount));
+        stats->Set(Nan::New("gcIncrementalMarkingTime").ToLocalChecked(), javascriptNumber(b->stats.gcIncrementalMarkingTime));
+        stats->Set(Nan::New("gcProcessWeakCallbacksCount").ToLocalChecked(), javascriptNumberSize(b->stats.gcProcessWeakCallbacksCount));
+        stats->Set(Nan::New("gcProcessWeakCallbacksTime").ToLocalChecked(), javascriptNumber(b->stats.gcProcessWeakCallbacksTime));
 
         stats->Set(Nan::New("total_heap_size").ToLocalChecked(), javascriptNumberSize(b->total_heap_size));
         stats->Set(Nan::New("total_heap_size_executable").ToLocalChecked(), javascriptNumberSize(b->total_heap_size_executable));
@@ -168,6 +176,11 @@ NAN_GC_CALLBACK(memwatch::after_gc) {
 
         Nan::GetHeapStatistics(&hs);
 
+        timeval tv;
+        gettimeofday(&tv, NULL);
+
+        baton->gc_ts = (tv.tv_sec * 1000000) + tv.tv_usec;
+
         baton->total_heap_size = hs.total_heap_size();
         baton->total_heap_size_executable = hs.total_heap_size_executable();
         baton->total_physical_size = hs.total_physical_size();
@@ -179,6 +192,7 @@ NAN_GC_CALLBACK(memwatch::after_gc) {
         baton->gc_time = gcTime;
         baton->type = type;
         baton->flags = flags;
+        baton->stats = s_stats;
         baton->req.data = (void *) baton;
 
         // schedule our work to run in a moment, once gc has fully completed.
