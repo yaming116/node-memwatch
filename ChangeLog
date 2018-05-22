@@ -1,5 +1,10 @@
+v1.0.2 -
+	* Fix race condition on gc timers and counters
+	* Add gc_ts field to stats event
+
 v1.0.1 -
 	* Fix build error on linux
+
 v1.0.0 -
 	* First airbnb forked version.
 	* Emit all HeapStatistics
