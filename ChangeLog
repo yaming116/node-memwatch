@@ -1,3 +1,7 @@
+v2.0.0
+	* BREAKING: Drop support for Node <= 9.
+	* Add support for Node >= 10.
+
 v1.0.2 -
 	* Fix race condition on gc timers and counters
 	* Add gc_ts field to stats event
